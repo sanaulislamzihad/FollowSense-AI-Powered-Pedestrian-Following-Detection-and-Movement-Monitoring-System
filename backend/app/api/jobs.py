@@ -12,6 +12,7 @@ from ..database import get_db
 from ..models import AnalysisJob, Camera, CrowdEvent, FollowingEvent, GroupEvent, TrackRecord, Video
 from ..schemas import JobCreate, crowd_out, following_out, group_out, job_out
 from ..services.jobs import manager
+from ..services.photos import job_snapshot_files
 from ..services.render import encode_png, heatmap_image, trajectory_image
 from ..services.reports import job_pdf
 from ..services.settings_service import load_settings
@@ -83,7 +84,7 @@ def delete_job(job_id: int, db: Session = Depends(get_db)):
     if job.status in ("queued", "running"):
         raise HTTPException(409, "Stop the job first")
     files = [job.output_path, job.reference_image] + [e.snapshot_path for e in job.following_events] + \
-        [e.snapshot_path for e in job.crowd_events]
+        [e.snapshot_path for e in job.crowd_events] + job_snapshot_files(job.id)
     db.delete(job)
     db.commit()
     for f in files:

@@ -1,13 +1,14 @@
 import { NavLink, Outlet } from 'react-router-dom'
 import { useState } from 'react'
 import {
-  Activity, BarChart3, Footprints, LayoutDashboard, Menu, MonitorPlay, Settings, Users, Video, X,
+  Activity, BarChart3, Footprints, LayoutDashboard, Menu, MonitorPlay, ScanFace, Settings, Users, Video, X,
 } from 'lucide-react'
 import { useRealtime } from '../lib/realtime'
 import Toasts from './Toasts'
 
 const NAV = [
   { to: '/', label: 'Overview', icon: LayoutDashboard, end: true },
+  { to: '/watch', label: 'Follow Watch', icon: ScanFace },
   { to: '/monitor', label: 'Live Monitoring', icon: MonitorPlay },
   { to: '/events', label: 'Following Events', icon: Footprints },
   { to: '/crowd', label: 'Crowd Management', icon: Users },

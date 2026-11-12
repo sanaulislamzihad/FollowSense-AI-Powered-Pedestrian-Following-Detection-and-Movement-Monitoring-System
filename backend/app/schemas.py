@@ -4,6 +4,7 @@ from __future__ import annotations
 from pydantic import BaseModel, Field
 
 from .models import AnalysisJob, Camera, CrowdEvent, FollowingEvent, GroupEvent, Video
+from .services.photos import photo_flags
 
 
 class JobCreate(BaseModel):
@@ -58,7 +59,16 @@ def job_out(j: AnalysisJob, brief: bool = False, runtime=None) -> dict:
     return d
 
 
-def following_out(e: FollowingEvent) -> dict:
+def following_out(e: FollowingEvent, job: AnalysisJob | None = None) -> dict:
+    d = _following_base(e)
+    d["photos"] = photo_flags(e.job_id, e.event_key)  # {"follower": bool, "leader": bool}
+    if job is not None:
+        d.update({"is_live": job.is_live, "job_status": job.status, "source_name": job.video.original_name
+                  if job.video else (job.camera.name if job.camera else job.source)})
+    return d
+
+
+def _following_base(e: FollowingEvent) -> dict:
     return {
         "id": e.id, "job_id": e.job_id, "event_key": e.event_key, "leader_id": e.leader_id,
         "follower_id": e.follower_id, "start_time": e.start_time, "end_time": e.end_time,

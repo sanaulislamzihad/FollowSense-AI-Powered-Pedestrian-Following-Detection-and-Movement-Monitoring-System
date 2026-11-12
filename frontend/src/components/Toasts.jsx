@@ -12,7 +12,7 @@ export default function Toasts() {
           {t.kind === 'following'
             ? <AlertTriangle className="h-5 w-5 text-rose-500 shrink-0 mt-0.5" />
             : <Users className="h-5 w-5 text-amber-500 shrink-0 mt-0.5" />}
-          <button className="text-left flex-1" onClick={() => { nav(t.kind === 'following' ? '/events' : '/crowd'); dismiss(t.id) }}>
+          <button className="text-left flex-1" onClick={() => { nav(t.kind === 'following' ? '/watch' : '/crowd'); dismiss(t.id) }}>
             <div className="text-sm font-semibold text-slate-800">
               {t.kind === 'following' ? 'Potential following detected' : 'Crowd alert'}
             </div>

@@ -94,3 +94,37 @@ def test_cameras_crud(client):
     cam = client.post("/api/cameras", json={"name": "Gate", "source_url": "rtsp://127.0.0.1:1/none"}).json()
     assert client.get("/api/cameras").json()[0]["name"] == "Gate"
     assert client.delete(f"/api/cameras/{cam['id']}").json()["ok"]
+
+
+def test_following_photos(client):
+    """Follower / leader pictures are stored with the event and served to the dashboard."""
+    from app.core.photos import Photo
+    from app.database import SessionLocal
+    from app.models import AnalysisJob, FollowingEvent
+    from app.services.photos import job_snapshot_files, save_photo
+
+    with SessionLocal() as db:
+        job = db.query(AnalysisJob).first()
+        ev = FollowingEvent(job_id=job.id, event_key="F77", leader_id=4, follower_id=9, start_time=2,
+                            end_time=12, duration=10, confidence=0.9, metrics={})
+        db.add(ev)
+        db.commit()
+        eid, jid = ev.id, job.id
+    base = f"/api/events/following/{eid}"
+    assert client.get(base).json()["photos"] == {"follower": False, "leader": False}
+    assert client.get(f"{base}/photo/follower.jpg").status_code == 404
+
+    photo = Photo(person=np.full((120, 50, 3), 90, np.uint8), face=np.full((200, 200, 3), 150, np.uint8),
+                  face_found=False, score=10.0, t=3.0)
+    save_photo(jid, "F77", "follower", photo)
+    out = client.get(base).json()
+    assert out["photos"] == {"follower": True, "leader": False}
+    assert out["source_name"] == "synthetic.mp4" and out["is_live"] is False
+    for kind in ("face", "person"):
+        r = client.get(f"{base}/photo/follower.jpg?kind={kind}")
+        assert r.status_code == 200 and r.headers["content-type"] == "image/jpeg"
+    assert client.get(f"{base}/photo/leader.jpg").status_code == 404
+    assert client.get(f"{base}/photo/stranger.jpg").status_code == 404
+    listed = client.get(f"/api/events/following?job_id={jid}").json()
+    assert next(e for e in listed if e["id"] == eid)["photos"]["follower"] is True
+    assert len(job_snapshot_files(jid)) == 2

@@ -7,15 +7,18 @@ from fastapi.responses import FileResponse, Response
 from sqlalchemy.orm import Session
 
 from ..database import get_db
-from ..models import CrowdEvent, FollowingEvent, GroupEvent, utcnow
+from ..models import AnalysisJob, CrowdEvent, FollowingEvent, GroupEvent, utcnow
 from ..schemas import ReviewIn, crowd_out, following_out, group_out
+from ..services.photos import KINDS, ROLES, photo_path
 from ..services.reports import crowd_csv, following_csv
 
 router = APIRouter(prefix="/api/events", tags=["events"])
 
 
-def _following_query(db, job_id, status, min_confidence):
+def _following_query(db, job_id, status, min_confidence, active=None):
     q = db.query(FollowingEvent)
+    if active is not None:
+        q = q.filter(FollowingEvent.is_active == active)
     if job_id:
         q = q.filter(FollowingEvent.job_id == job_id)
     if status:
@@ -27,8 +30,11 @@ def _following_query(db, job_id, status, min_confidence):
 
 @router.get("/following")
 def list_following(job_id: int | None = None, status: str | None = None, min_confidence: float = 0,
-                   limit: int = 200, db: Session = Depends(get_db)):
-    return [following_out(e) for e in _following_query(db, job_id, status, min_confidence).limit(limit)]
+                   active: bool | None = None, limit: int = 200, db: Session = Depends(get_db)):
+    events = _following_query(db, job_id, status, min_confidence, active).limit(limit).all()
+    job_ids = {e.job_id for e in events}
+    jobs = {j.id: j for j in db.query(AnalysisJob).filter(AnalysisJob.id.in_(job_ids))} if job_ids else {}
+    return [following_out(e, jobs.get(e.job_id)) for e in events]
 
 
 @router.get("/following/export.csv")
@@ -44,7 +50,20 @@ def get_following(event_id: int, db: Session = Depends(get_db)):
     e = db.get(FollowingEvent, event_id)
     if not e:
         raise HTTPException(404, "Event not found")
-    return following_out(e)
+    return following_out(e, db.get(AnalysisJob, e.job_id))
+
+
+@router.get("/following/{event_id}/photo/{role}.jpg")
+def following_photo(event_id: int, role: str, kind: str = "face", db: Session = Depends(get_db)):
+    """Picture of the follower or the leader: ``kind=face`` (face / head crop) or ``kind=person``."""
+    e = db.get(FollowingEvent, event_id)
+    if not e or role not in ROLES or kind not in KINDS:
+        raise HTTPException(404, "No photo")
+    path = photo_path(e.job_id, e.event_key, role, kind)
+    if not path.exists():
+        raise HTTPException(404, "No photo")
+    # photos get better while an event is active, so the browser must not cache them
+    return FileResponse(path, media_type="image/jpeg", headers={"Cache-Control": "no-store"})
 
 
 @router.patch("/following/{event_id}")

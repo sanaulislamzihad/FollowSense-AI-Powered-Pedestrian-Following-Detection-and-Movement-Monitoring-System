@@ -78,3 +78,23 @@ def test_tiles_cover_frame_and_merge_removes_duplicates():
                       [300, 300, 340, 400, 0.8, 0]], np.float32)
     merged = merge_boxes(boxes, 0.5)
     assert len(merged) == 2
+
+
+def test_photo_bank_keeps_the_clearest_picture():
+    import numpy as np
+
+    from app.core.photos import FACE_SIZE, PhotoBank
+
+    bank = PhotoBank()
+    frame = np.random.default_rng(1).integers(0, 255, (480, 640, 3), dtype=np.uint8)
+    bank.update(frame, [(7, (100, 100, 140, 200), 0.6)], t=0.0)       # 100 px tall
+    first = bank.get(7)
+    assert first is not None and first.face.shape == (FACE_SIZE, FACE_SIZE, 3)
+    assert first.person.shape[0] >= 100                                # body crop with a margin
+    bank.update(frame, [(7, (300, 100, 380, 300), 0.8)], t=1.0)       # closer to the camera: 200 px tall
+    assert bank.get(7).score > first.score and bank.get(7).t == 1.0
+    bank.update(frame, [(7, (300, 300, 340, 380), 0.8)], t=2.0)       # smaller again: keep the better one
+    assert bank.get(7).t == 1.0
+    bank.update(frame, [(8, (600, 100, 640, 300), 0.9)], t=2.0)       # cut by the frame border: penalised
+    assert bank.get(8).score < bank.get(7).score
+    assert bank.get(99) is None

@@ -52,7 +52,7 @@ def overview(db: Session = Depends(get_db)):
         "crowd_alerts": db.query(CrowdEvent).count(),
         "peak_crowd": int(db.query(func.coalesce(func.max(AnalysisJob.peak_count), 0)).scalar()),
         "relationships": rel_totals,
-        "recent_alerts": [following_out(e) for e in
+        "recent_alerts": [following_out(e, db.get(AnalysisJob, e.job_id)) for e in
                           db.query(FollowingEvent).order_by(FollowingEvent.id.desc()).limit(8)],
         "recent_crowd": [crowd_out(c) for c in db.query(CrowdEvent).order_by(CrowdEvent.id.desc()).limit(5)],
         "running_jobs": [job_out(j, brief=True, runtime=manager.runtime(j.id)) for j in running],

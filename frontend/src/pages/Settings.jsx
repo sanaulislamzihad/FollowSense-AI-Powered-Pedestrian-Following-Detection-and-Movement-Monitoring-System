@@ -9,7 +9,8 @@ const SECTIONS = [
     title: 'Detection & tracking',
     fields: [
       ['confidence_threshold', 'Detection confidence', 'Minimum YOLO score to start a track', { min: 0.1, max: 0.9, step: 0.05 }],
-      ['image_size', 'Inference size (px)', 'Larger finds smaller / distant people but is slower', { options: [640, 960, 1280, 1600] }],
+      ['image_size', 'Inference size (px)', 'Saved videos: larger finds smaller / distant people but is slower', { options: [640, 960, 1280, 1600] }],
+      ['live_image_size', 'Live inference size (px)', 'Used for CCTV streams: smaller keeps up with the camera in real time', { options: [480, 640, 960, 1280] }],
       ['detection_mode', 'Detection mode', 'Tiled adds full-resolution tiles for dense crowds (≈4× slower, use with a GPU)', { options: ['standard', 'tiled'] }],
       ['tracker', 'Tracker', 'ByteTrack is faster; BoT-SORT handles moving cameras slightly better', { options: ['bytetrack', 'botsort'] }],
       ['target_fps', 'Analysed frames / second', 'Frames sampled from recorded video (0 = every frame)', { min: 0, max: 30, step: 1 }],

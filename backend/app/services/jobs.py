@@ -16,6 +16,7 @@ from ..core.following import EngineEvent
 from ..core.pipeline import Callbacks, VideoAnalyzer
 from ..database import SessionLocal
 from ..models import AnalysisJob, CrowdEvent, FollowingEvent, GroupEvent, TrackRecord, utcnow
+from .photos import save_photo
 from .realtime import hub
 
 log = logging.getLogger(__name__)
@@ -31,6 +32,7 @@ class JobRuntime:
     viewers: int = 0
     cond: threading.Condition = field(default_factory=threading.Condition)
     db_ids: dict = field(default_factory=dict)  # engine event key -> DB row id
+    photo_scores: dict = field(default_factory=dict)  # (event key, role) -> score of the saved photo
     last_db_progress: float = 0.0
     last_jpeg_time: float = 0.0
     done: bool = False
@@ -224,6 +226,15 @@ class JobManager:
         except Exception:  # noqa: BLE001
             log.exception("could not persist event %s", ev.key)
             return
+        if ev.kind == "following" and ev.photos:
+            # keep the clearest picture of both people; it improves while the event is active
+            for role, photo in ev.photos.items():
+                if photo is not None and photo.score > rt.photo_scores.get((ev.key, role), 0):
+                    try:
+                        save_photo(rt.job_id, ev.key, role, photo)
+                        rt.photo_scores[(ev.key, role)] = photo.score
+                    except Exception:  # noqa: BLE001
+                        log.exception("could not save %s photo of %s", role, ev.key)
         hub.publish({"type": "alert" if ev.action == "opened" and ev.kind != "group" else "event",
                      "kind": ev.kind, "action": ev.action, "job_id": rt.job_id,
                      "event_id": event_id, "key": ev.key, **p})

@@ -1,9 +1,10 @@
 import { Link } from 'react-router-dom'
-import { AlertTriangle, Footprints, MonitorPlay, Users, UsersRound, Video } from 'lucide-react'
+import { AlertTriangle, Footprints, MonitorPlay, ScanFace, Users, UsersRound, Video } from 'lucide-react'
 import { api } from '../lib/api'
 import { useLive, useRealtime } from '../lib/realtime'
 import { Badge, Card, Empty, PageHeader, Progress, StatCard } from '../components/ui'
 import { RelationshipDoughnut } from '../components/charts'
+import { PersonPhoto } from '../components/PersonPhoto'
 import { fmtDate, fmtPct, fmtTime } from '../lib/format'
 
 export default function Overview() {
@@ -14,7 +15,8 @@ export default function Overview() {
   return (
     <>
       <PageHeader title="Overview" subtitle="Pedestrian movement, following behaviour and crowd status at a glance">
-        <Link to="/videos" className="btn-primary"><Video size={16} /> Analyse a video</Link>
+        <Link to="/watch" className="btn-primary"><ScanFace size={16} /> Follow Watch</Link>
+        <Link to="/videos" className="btn-ghost"><Video size={16} /> Analyse a video</Link>
         <Link to="/monitor" className="btn-ghost"><MonitorPlay size={16} /> Live monitoring</Link>
       </PageHeader>
 
@@ -51,7 +53,7 @@ export default function Overview() {
 
       <div className="grid grid-cols-1 xl:grid-cols-3 gap-6 mt-6">
         <Card title="Recent following alerts" className="xl:col-span-2" pad={false}
-          actions={<Link to="/events" className="text-sm text-brand-700 font-medium">View all</Link>}>
+          actions={<Link to="/watch" className="text-sm text-brand-700 font-medium">View all</Link>}>
           {d.recent_alerts?.length ? (
             <table className="w-full">
               <thead><tr><th className="th">Event</th><th className="th">Pair</th><th className="th">Time</th><th className="th">Duration</th><th className="th">Confidence</th><th className="th">Status</th></tr></thead>
@@ -59,7 +61,15 @@ export default function Overview() {
                 {d.recent_alerts.map((e) => (
                   <tr key={e.id}>
                     <td className="td font-medium">#{e.id} <span className="text-slate-400">job {e.job_id}</span></td>
-                    <td className="td">ID {e.follower_id} → ID {e.leader_id}</td>
+                    <td className="td">
+                      <div className="flex items-center gap-2">
+                        <PersonPhoto event={e} role="follower" className="h-9 w-9 !rounded-lg" />
+                        <span className="text-xs">ID {e.follower_id}</span>
+                        <span className="text-slate-400">→</span>
+                        <PersonPhoto event={e} role="leader" className="h-9 w-9 !rounded-lg" />
+                        <span className="text-xs">ID {e.leader_id}</span>
+                      </div>
+                    </td>
                     <td className="td">{fmtTime(e.start_time)}</td>
                     <td className="td">{e.duration.toFixed(1)}s</td>
                     <td className="td font-semibold">{fmtPct(e.confidence)}</td>

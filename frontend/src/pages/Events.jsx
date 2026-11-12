@@ -5,6 +5,7 @@ import { api, url } from '../lib/api'
 import { useLive } from '../lib/realtime'
 import { Badge, Card, Empty, Modal, PageHeader } from '../components/ui'
 import SceneCanvas from '../components/SceneCanvas'
+import { FollowPair, PersonPhoto } from '../components/PersonPhoto'
 import { fmtDate, fmtNum, fmtPct, fmtTime } from '../lib/format'
 
 const STATUSES = ['', 'new', 'confirmed', 'reviewed', 'dismissed']
@@ -62,7 +63,7 @@ export default function Events() {
             <table className="w-full">
               <thead>
                 <tr>
-                  <th className="th">Event</th><th className="th">Lead</th><th className="th">Follower</th><th className="th">Detected at</th>
+                  <th className="th">Event</th><th className="th">Follower → followed</th><th className="th">Detected at</th>
                   <th className="th">Duration</th><th className="th">Confidence</th><th className="th">Distance</th><th className="th">Lag</th>
                   <th className="th">Status</th><th className="th text-right">Actions</th>
                 </tr>
@@ -71,8 +72,15 @@ export default function Events() {
                 {events.map((e) => (
                   <tr key={e.id} className="hover:bg-slate-50">
                     <td className="td font-medium">#{e.id}<div className="text-xs text-slate-400">job {e.job_id}{e.is_active && <span className="text-rose-500 ml-1">● active</span>}</div></td>
-                    <td className="td">ID {e.leader_id}</td>
-                    <td className="td">ID {e.follower_id}</td>
+                    <td className="td">
+                      <div className="flex items-center gap-2">
+                        <PersonPhoto event={e} role="follower" className="h-11 w-11 !rounded-lg" onClick={() => setSelected(e)} />
+                        <span className="text-xs font-semibold text-rose-600">ID {e.follower_id}</span>
+                        <span className="text-slate-400">→</span>
+                        <PersonPhoto event={e} role="leader" className="h-11 w-11 !rounded-lg" onClick={() => setSelected(e)} />
+                        <span className="text-xs font-semibold text-amber-600">ID {e.leader_id}</span>
+                      </div>
+                    </td>
                     <td className="td tabular-nums">{fmtTime(e.start_time)}</td>
                     <td className="td tabular-nums">{e.duration.toFixed(1)}s</td>
                     <td className="td"><ConfidenceBar v={e.confidence} /></td>
@@ -108,7 +116,7 @@ function ConfidenceBar({ v }) {
   )
 }
 
-function EventModal({ event, onClose, onSaved }) {
+export function EventModal({ event, onClose, onSaved }) {
   const [notes, setNotes] = useState('')
   const [analytics, setAnalytics] = useState(null)
   const video = useRef(null)
@@ -154,6 +162,18 @@ function EventModal({ event, onClose, onSaved }) {
           )}
         </div>
         <div>
+          <div className="rounded-xl border border-slate-200 p-4 mb-4">
+            <FollowPair event={event} size="h-28 w-28" />
+            {(event.photos?.follower || event.photos?.leader) && (
+              <div className="grid grid-cols-2 gap-3 mt-4">
+                <PersonPhoto event={event} role="follower" kind="person" className="h-56 w-full" />
+                <PersonPhoto event={event} role="leader" kind="person" className="h-56 w-full" />
+              </div>
+            )}
+            <div className="text-xs text-slate-500 mt-2">
+              Clearest pictures captured while the two people were tracked{event.source_name ? ` · ${event.source_name}` : ''}.
+            </div>
+          </div>
           <div className="grid grid-cols-3 gap-3 mb-4">
             <Mini label="Confidence" value={fmtPct(event.confidence)} />
             <Mini label="Duration" value={`${event.duration.toFixed(1)}s`} />

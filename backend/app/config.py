@@ -55,6 +55,9 @@ class DetectionSettings:
     confidence_threshold: float = 0.25
     iou_threshold: float = 0.5
     image_size: int = 1280  # larger input finds small / distant people in crowds
+    # Live streams must keep up with the camera: a smaller input is several times faster, and a
+    # tracker fed 6+ frames/s keeps its IDs far better than one fed 1-2 sharp frames/s.
+    live_image_size: int = 640
     detection_mode: str = "standard"  # standard | tiled (extra full-res tiles for dense crowds)
     tile_size: int = 640
     tracker: str = "bytetrack"  # bytetrack | botsort

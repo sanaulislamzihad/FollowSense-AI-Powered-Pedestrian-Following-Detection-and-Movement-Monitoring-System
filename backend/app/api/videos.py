@@ -14,6 +14,7 @@ from ..database import get_db
 from ..models import AnalysisJob, Video
 from ..schemas import video_out
 from ..services.jobs import manager
+from ..services.photos import job_snapshot_files
 from ..services.settings_service import load_settings
 
 router = APIRouter(prefix="/api/videos", tags=["videos"])
@@ -103,6 +104,7 @@ def delete_video(video_id: int, db: Session = Depends(get_db)):
     for j in v.jobs:
         files += [j.output_path, j.reference_image]
         files += [e.snapshot_path for e in j.following_events] + [e.snapshot_path for e in j.crowd_events]
+        files += job_snapshot_files(j.id)
     db.delete(v)
     db.commit()
     for f in files:

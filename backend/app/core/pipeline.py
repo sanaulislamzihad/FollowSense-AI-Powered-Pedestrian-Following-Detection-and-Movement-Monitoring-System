@@ -24,6 +24,7 @@ from .crowd import CrowdMonitor, MovementAccumulator
 from .detector import PedestrianTracker
 from .following import SEVERITY, EngineEvent, FollowingEngine, Relationship
 from .motion import CameraMotionCompensator
+from .photos import PhotoBank
 from .tracks import TrackStore
 
 MAX_SIDE = 1280  # frames are processed / written at most this large
@@ -161,11 +162,13 @@ class VideoAnalyzer:
         stride = 1 if (self.is_stream or s.target_fps <= 0) else max(1, int(round(fps / s.target_fps)))
         eff_fps = fps / stride
 
-        tracker = PedestrianTracker(s, self.model_path, self.device, eff_fps)
+        tracker = PedestrianTracker(s, self.model_path, self.device, eff_fps,
+                                    image_size=s.live_image_size if self.is_stream else s.image_size)
         store = TrackStore(stale_after_sec=s.occlusion_buffer_sec)
         engine = FollowingEngine(s)
         crowd = CrowdMonitor(s)
         cmc = CameraMotionCompensator(enabled=s.camera_motion_compensation)
+        photos = PhotoBank()
         movement: MovementAccumulator | None = None
         writer: VideoWriter | None = None
         result = AnalysisResult()
@@ -221,6 +224,7 @@ class VideoAnalyzer:
                 movement.add_points(ref)
 
                 visible = [d for d in dets if store.tracks[d[0]].hits >= s.min_track_hits]
+                photos.update(frame, visible, t)  # clean frame: boxes are drawn further down
                 events: list[EngineEvent] = crowd.update(
                     t, [d[0] for d in visible], [d[1] for d in visible])
 
@@ -250,8 +254,11 @@ class VideoAnalyzer:
                 if writer:
                     writer.write(annotated)
                 processed += 1
+                if self.is_stream and processed % 20 == 0:
+                    tracker.set_effective_fps(processed / max(time.monotonic() - wall_start, 1e-6))
 
                 for ev in events:
+                    self._attach_photos(ev, photos)
                     if self.cb.on_event:
                         self.cb.on_event(ev, annotated, t)
 
@@ -276,6 +283,7 @@ class VideoAnalyzer:
                     self.cb.on_progress(status)
         finally:
             for ev in engine.finish(t) + crowd.finish():
+                self._attach_photos(ev, photos)
                 if self.cb.on_event:
                     self.cb.on_event(ev, None, t)
             if reader:
@@ -300,6 +308,12 @@ class VideoAnalyzer:
         result.tracks = self._track_summaries(store)
         result.relationships, result.pairs = self._relationship_summary(engine)
         return result
+
+    @staticmethod
+    def _attach_photos(ev: EngineEvent, photos: PhotoBank) -> None:
+        if ev.kind == "following":
+            ev.photos = {"follower": photos.get(ev.payload["follower_id"]),
+                         "leader": photos.get(ev.payload["leader_id"])}
 
     def _track_summaries(self, store: TrackStore) -> list[dict]:
         out = []

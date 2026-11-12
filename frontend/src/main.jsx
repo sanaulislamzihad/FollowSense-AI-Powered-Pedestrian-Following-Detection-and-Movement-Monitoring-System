@@ -6,6 +6,7 @@ import Layout from './components/Layout'
 import { RealtimeProvider } from './lib/realtime'
 import Overview from './pages/Overview'
 import Monitor from './pages/Monitor'
+import Watch from './pages/Watch'
 import Events from './pages/Events'
 import Crowd from './pages/Crowd'
 import Analytics from './pages/Analytics'
@@ -19,6 +20,7 @@ ReactDOM.createRoot(document.getElementById('root')).render(
         <Routes>
           <Route element={<Layout />}>
             <Route index element={<Overview />} />
+            <Route path="watch" element={<Watch />} />
             <Route path="monitor" element={<Monitor />} />
             <Route path="events" element={<Events />} />
             <Route path="crowd" element={<Crowd />} />

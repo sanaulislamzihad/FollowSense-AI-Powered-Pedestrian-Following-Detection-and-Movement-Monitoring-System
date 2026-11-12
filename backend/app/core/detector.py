@@ -103,13 +103,14 @@ class PedestrianTracker:
     """One instance per video/stream (holds the tracker state)."""
 
     def __init__(self, settings: DetectionSettings, model_path: str, device: str = "",
-                 effective_fps: float = 15.0):
+                 effective_fps: float = 15.0, image_size: int | None = None):
         from ultralytics import YOLO
         from ultralytics.trackers.bot_sort import BOTSORT
         from ultralytics.trackers.byte_tracker import BYTETracker
         from ultralytics.utils import IterableSimpleNamespace
 
         self.s = settings
+        self.image_size = int(image_size or settings.image_size)
         self.model = YOLO(model_path)
         self.device = device or None
         args = IterableSimpleNamespace(**tracker_args(settings, effective_fps))
@@ -128,7 +129,7 @@ class PedestrianTracker:
     def detect(self, frame: np.ndarray) -> np.ndarray:
         """Returns (N, 6) array [x1, y1, x2, y2, conf, cls]."""
         h, w = frame.shape[:2]
-        parts = [self._predict([frame], self.s.image_size)[0].boxes.data.cpu().numpy()]
+        parts = [self._predict([frame], self.image_size)[0].boxes.data.cpu().numpy()]
         if self.tiled:
             tiles = make_tiles(w, h, self.s.tile_size)
             if tiles:
@@ -169,6 +170,14 @@ class PedestrianTracker:
             x1, y1, x2, y2, tid, score = row[:6]
             out.append((int(tid), (float(x1), float(y1), float(x2), float(y2)), float(score)))
         return out
+
+    def set_effective_fps(self, fps: float) -> None:
+        """Live streams: the real analysis rate is only known while running. Lost tracks are
+        kept for ``occlusion_buffer_sec`` of *wall time*, whatever the frame rate turns out to be."""
+        frames = max(4, int(round(self.s.occlusion_buffer_sec * fps)))
+        for attr in ("max_frames_lost", "max_time_lost"):  # name differs between ultralytics versions
+            if hasattr(self.tracker, attr):
+                setattr(self.tracker, attr, frames)
 
     def close(self) -> None:
         pass
