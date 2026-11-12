@@ -126,3 +126,75 @@ def test_crowd_of_people_runs_and_finds_the_follower():
     pairs = {(e.payload["leader_id"], e.payload["follower_id"])
              for e in events if e.kind == "following" and e.action == "opened"}
     assert (1, 2) in pairs
+
+
+# ---------------------------------------------------------------------------
+# Many-to-many following: chains, one person following several, several following one
+# ---------------------------------------------------------------------------
+def curve(t):
+    return 200 + 80 * t, 600 + 150 * math.sin(t / 3)
+
+
+def delayed(fn, lag, dx=0.0, dy=0.0):
+    def path(t):
+        if t < lag:
+            return None
+        x, y = fn(t - lag)
+        return x + dx, y + dy
+    return path
+
+
+def opened_links(events):
+    """{(follower, leader)} of every following event that was raised."""
+    return {(e.payload["follower_id"], e.payload["leader_id"])
+            for e in events if e.kind == "following" and e.action == "opened"}
+
+
+def test_chain_follower_is_also_followed():
+    # 3 follows 2 while 2 follows 1: person 2 is a follower and a leader at the same time.
+    engine, events = simulate({1: curve, 2: delayed(curve, 3.0), 3: delayed(curve, 6.0)}, 24)
+    assert {(2, 1), (3, 2)} <= opened_links(events)
+
+
+def test_one_person_follows_several_people():
+    # 1 and 2 walk side by side (a group); 3 walks behind both of them.
+    engine, events = simulate({1: curve, 2: delayed(curve, 0, dy=80), 3: delayed(curve, 2.5, dy=40)}, 22)
+    assert opened_links(events) == {(3, 1), (3, 2)}
+    assert dominant(engine, 1, 2) == Relationship.GROUP_WALKING.value
+
+
+def test_several_people_follow_one_person():
+    engine, events = simulate({1: curve, 2: delayed(curve, 2.5, dy=-40), 3: delayed(curve, 2.5, dy=45)}, 22)
+    assert opened_links(events) == {(2, 1), (3, 1)}
+    assert dominant(engine, 2, 3) == Relationship.GROUP_WALKING.value
+
+
+def test_follow_roles_are_many_to_many():
+    from app.core.annotate import follow_roles
+
+    # chain 3 -> 2 -> 1 (plus the implied 3 -> 1) and 4 following both 1 and 2
+    follows = [(1, 2, 0.9), (2, 3, 0.9), (1, 3, 0.8), (1, 4, 0.7), (2, 4, 0.7)]
+    leaders_of, followers_of, indirect = follow_roles(follows)
+    assert sorted(leaders_of[4]) == [1, 2]
+    assert sorted(followers_of[1]) == [2, 3, 4]
+    assert 2 in leaders_of and 2 in followers_of  # follower and leader at once
+    assert indirect == {(1, 3), (1, 4)}
+
+
+def test_following_around_a_corner_is_detected():
+    # Leader walks right, turns a 90 degree corner and walks down; the follower is 3 s behind,
+    # so for a while the two are heading in different directions at the same instant.
+    def corner(t):
+        d = 80 * t
+        return (200 + d, 400) if d <= 480 else (680, 400 + (d - 480))
+
+    engine, events = simulate({1: corner, 2: delayed(corner, 3.0)}, 20)
+    assert opened_links(events) == {(2, 1)}
+    closed = [e for e in events if e.kind == "following" and e.action == "closed"]
+    assert len(closed) == 1 and closed[0].payload["duration"] >= 12  # one event, not broken by the turn
+
+
+def test_crossing_paths_are_not_following():
+    # Two people whose paths cross at a right angle a few seconds apart.
+    engine, events = simulate({1: walk(200, 500, 80, 0), 2: walk(700, 60, 0, 80)}, 14)
+    assert not [e for e in events if e.kind == "following"]

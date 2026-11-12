@@ -110,9 +110,25 @@ def _nanmean(a: np.ndarray) -> float:
     return float(a.mean()) if a.size else math.nan
 
 
+def _behind(rel: np.ndarray, u: np.ndarray) -> np.ndarray:
+    """Is the follower (relative position ``rel``, body heights) inside the cone behind heading ``u``?"""
+    along = (rel * u).sum(axis=1)
+    lateral = np.abs(rel[:, 0] * u[:, 1] - rel[:, 1] * u[:, 0])
+    return (along < -0.3) & (lateral < np.maximum(np.abs(along), 0.6))
+
+
 def _orientation_metrics(lead: TrackSamples, foll: TrackSamples, n_win: int,
-                         s: DetectionSettings) -> tuple[float, float, float, float]:
-    """behind_ratio, side_ratio, trajectory_similarity, lag_sec for ``foll`` behind ``lead``."""
+                         s: DetectionSettings) -> tuple[float, float, float, float, float]:
+    """behind_ratio, side_ratio, trajectory_similarity, lag_sec, lagged direction similarity
+    for ``foll`` behind ``lead``.
+
+    People turn corners. A follower who is a few seconds behind is then still walking the
+    previous leg, so at the *same instant* the two headings differ and the follower is no longer
+    straight behind the leader's new heading. Both measures are therefore also evaluated along
+    the leader's path: the follower's heading is compared with the leader's heading ``lag``
+    seconds earlier, and "behind" is also tested against the direction from where the leader
+    was ``lag`` seconds ago to where the leader is now.
+    """
     G = len(lead.h)
     w = slice(G - n_win, G)
     lp, fp = lead.pos[w], foll.pos[w]
@@ -126,14 +142,13 @@ def _orientation_metrics(lead: TrackSamples, foll: TrackSamples, n_win: int,
         rel = (fp[valid] - lp[valid]) / scale[valid, None]
         along = (rel * u).sum(axis=1)
         lateral = np.abs(rel[:, 0] * u[:, 1] - rel[:, 1] * u[:, 0])
-        behind = (along < -0.3) & (lateral < np.maximum(np.abs(along), 0.6))
         side = (np.abs(along) < 0.6) | (lateral >= np.abs(along))
-        behind_ratio = float(behind.mean())
+        behind_ratio = float(_behind(rel, u).mean())
         side_ratio = float(side.mean())
 
     # Lag search: compare follower(t) with leader(t - lag) for every candidate lag.
     # Vectorised over all lags at once (important in crowded scenes with many pairs).
-    best_d, best_lag = math.inf, 0.0
+    best_d, best_lag, best_k = math.inf, 0.0, 0
     k_min = max(1, int(round(s.min_lag_sec / GRID_DT)))
     k_max = min(int(round(s.max_lag_sec / GRID_DT)), G - n_win)
     if k_max >= k_min:
@@ -146,9 +161,28 @@ def _orientation_metrics(lead: TrackSamples, foll: TrackSamples, n_win: int,
         means[counts < n_win * 0.6] = np.inf
         j = int(np.argmin(means))
         if math.isfinite(means[j]):
-            best_d, best_lag = float(means[j]), float(lags[j] * GRID_DT)
+            best_d, best_lag, best_k = float(means[j]), float(lags[j] * GRID_DT), int(lags[j])
     traj_sim = math.exp(-(best_d ** 2) / (2 * RETRACE_SIGMA ** 2)) if math.isfinite(best_d) else 0.0
-    return behind_ratio, side_ratio, traj_sim, best_lag
+
+    lagged_dir = math.nan
+    if best_k:
+        past = (G - n_win) + np.arange(n_win) - best_k  # leader samples ``lag`` seconds earlier
+        # "behind" along the leader's path: chord from the leader's earlier to current position
+        chord = lp - lead.pos[past]
+        clen = np.linalg.norm(chord, axis=1)
+        ok = ~np.isnan(scale) & ~np.isnan(clen) & (clen / np.maximum(scale, 1) > 0.3)
+        if ok.mean() >= 0.5:
+            rel = (fp[ok] - lp[ok]) / scale[ok, None]
+            behind_ratio = max(behind_ratio, float(_behind(rel, chord[ok] / clen[ok, None]).sum() / n_win))
+        # heading of the follower now vs. heading of the leader when it was at the same place
+        fv, pv = foll.vel[w], lead.vel[past]
+        fs, ps = np.linalg.norm(fv, axis=1), np.linalg.norm(pv, axis=1)
+        mv = ~np.isnan(fs) & ~np.isnan(ps) & ~np.isnan(scale)
+        mv[mv] &= (fs[mv] / np.maximum(scale[mv], 1) > s.min_moving_speed) & \
+            (ps[mv] / np.maximum(scale[mv], 1) > s.min_moving_speed)
+        if mv.sum() >= n_win * 0.5:
+            lagged_dir = float(((fv[mv] * pv[mv]).sum(axis=1) / (fs[mv] * ps[mv])).mean())
+    return behind_ratio, side_ratio, traj_sim, best_lag, lagged_dir
 
 
 def analyze_pair(a: TrackSamples, b: TrackSamples, n_win: int,
@@ -181,11 +215,10 @@ def analyze_pair(a: TrackSamples, b: TrackSamples, n_win: int,
     m.speed_consistency = float((np.minimum(sa[moving], sb[moving]) /
                                  np.maximum(sa[moving], sb[moving])).mean())
 
-    if m.direction_similarity < s.direction_similarity_threshold:
-        return Relationship.NO_FOLLOWING, m
-    if m.mean_distance > s.follow_max_distance:
-        m.score = 0.0
-        return Relationship.SAME_DIRECTION, m
+    same_heading = m.direction_similarity >= s.direction_similarity_threshold
+    if m.mean_distance > s.follow_max_distance or m.direction_similarity < 0:
+        # too far apart to be compared, or walking in opposing directions
+        return (Relationship.SAME_DIRECTION if same_heading else Relationship.NO_FOLLOWING), m
 
     # Evaluate both orientations and keep the one where somebody is behind the other.
     ab = _orientation_metrics(a, b, n_win, s)  # b follows a
@@ -195,7 +228,13 @@ def analyze_pair(a: TrackSamples, b: TrackSamples, n_win: int,
         chosen = ba
     else:
         chosen = ab
-    m.behind_ratio, m.side_ratio, m.trajectory_similarity, m.lag_sec = chosen
+    m.behind_ratio, m.side_ratio, m.trajectory_similarity, m.lag_sec, lagged_dir = chosen
+    if (not same_heading and not math.isnan(lagged_dir)
+            and m.trajectory_similarity >= s.trajectory_similarity_threshold):
+        # The follower retraces the leader's path around a bend: judge the heading along the path.
+        m.direction_similarity = max(m.direction_similarity, lagged_dir)
+    if m.direction_similarity < s.direction_similarity_threshold:
+        return Relationship.NO_FOLLOWING, m
 
     dir_score = max(0.0, (m.direction_similarity - 0.5) / 0.5)
     m.score = float(np.clip(0.25 * dir_score + 0.2 * m.speed_consistency +
@@ -242,6 +281,8 @@ class EngineEvent:
     action: str  # opened | updated | closed
     key: str
     payload: dict
+    # following events: {"follower": Photo | None, "leader": Photo | None} (set by the pipeline)
+    photos: dict | None = None
 
 
 class FollowingEngine:

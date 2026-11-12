@@ -10,6 +10,7 @@ RED = (60, 60, 235)
 ORANGE = (0, 150, 255)
 GREEN = (90, 200, 60)
 YELLOW = (0, 215, 255)
+PURPLE = (200, 60, 190)  # follows somebody *and* is followed by somebody else
 WHITE = (255, 255, 255)
 DARK = (25, 25, 25)
 LEVEL_COLORS = {"normal": GREEN, "elevated": YELLOW, "critical": RED}
@@ -22,10 +23,41 @@ def id_color(tid: int) -> tuple[int, int, int]:
 
 
 def _label(img, text, x, y, color, scale=0.45):
-    (tw, th), _ = cv2.getTextSize(text, cv2.FONT_HERSHEY_SIMPLEX, scale, 1)
-    y = max(th + 4, int(y))
-    cv2.rectangle(img, (int(x), y - th - 4), (int(x) + tw + 4, y), color, -1)
-    cv2.putText(img, text, (int(x) + 2, y - 3), cv2.FONT_HERSHEY_SIMPLEX, scale, DARK, 1, cv2.LINE_AA)
+    """Filled label whose bottom-left corner is (x, y); ``text`` may be a list of lines
+    (stacked upwards). The label is shifted to stay inside the frame."""
+    lines = [text] if isinstance(text, str) else list(text)
+    sizes = [cv2.getTextSize(line, cv2.FONT_HERSHEY_SIMPLEX, scale, 1)[0] for line in lines]
+    tw, th = max(w for w, _ in sizes), max(h for _, h in sizes)
+    row = th + 5
+    x = int(min(max(0, x), max(0, img.shape[1] - tw - 4)))
+    y = int(min(max(row * len(lines), y), img.shape[0]))
+    cv2.rectangle(img, (x, y - row * len(lines)), (x + tw + 4, y), color, -1)
+    for i, line in enumerate(lines):
+        base = y - row * (len(lines) - 1 - i) - 3
+        cv2.putText(img, line, (x + 2, base), cv2.FONT_HERSHEY_SIMPLEX, scale, DARK, 1, cv2.LINE_AA)
+
+
+def follow_roles(follows) -> tuple[dict[int, list[int]], dict[int, list[int]], set[tuple[int, int]]]:
+    """Many-to-many view of the active following links.
+
+    Returns ``(leaders_of, followers_of, indirect)``: every person can follow several people
+    and be followed by several people at once (e.g. a chain 3 -> 2 -> 1, where 2 is both).
+    ``indirect`` holds the links that are implied by a chain (3 -> 1 when 3 -> 2 and 2 -> 1
+    are active too); they are drawn thinner so the picture stays readable.
+    """
+    leaders_of: dict[int, list[int]] = {}
+    followers_of: dict[int, list[int]] = {}
+    for leader, follower, _ in follows:
+        leaders_of.setdefault(follower, []).append(leader)
+        followers_of.setdefault(leader, []).append(follower)
+    indirect = {(leader, follower) for leader, follower, _ in follows
+                if any(leader in leaders_of.get(mid, ()) for mid in leaders_of[follower] if mid != leader)}
+    return leaders_of, followers_of, indirect
+
+
+def _ids(ids: list[int], limit: int = 3) -> str:
+    ids = sorted(ids)
+    return ",".join(map(str, ids[:limit])) + ("+" if len(ids) > limit else "")
 
 
 def draw_frame(img: np.ndarray, *, detections, trajectories, follows, groups, clusters,
@@ -55,8 +87,7 @@ def draw_frame(img: np.ndarray, *, detections, trajectories, follows, groups, cl
             cv2.polylines(out, [pts.astype(np.int32).reshape(-1, 1, 2)], False, id_color(tid), 2, cv2.LINE_AA)
 
     by_id = {tid: box for tid, box, _ in detections}
-    followers = {f: (l, c) for l, f, c in follows}
-    leaders = {l for l, _, _ in follows}
+    leaders_of, followers_of, indirect = follow_roles(follows)
     member_of = {m: g for g, ms in groups.items() for m in ms}
 
     for gkey, members in groups.items():
@@ -64,25 +95,34 @@ def draw_frame(img: np.ndarray, *, detections, trajectories, follows, groups, cl
         for i in range(len(feet) - 1):
             cv2.line(out, tuple(map(int, feet[i])), tuple(map(int, feet[i + 1])), GREEN, 2, cv2.LINE_AA)
 
-    for tid, (x1, y1, x2, y2), conf in detections:
-        color, thick, text = id_color(tid), 2, f"ID {tid}"
-        if tid in followers:
-            color, thick, text = RED, 3, f"ID {tid} FOLLOWING {followers[tid][0]}"
-        elif tid in leaders:
-            color, thick, text = ORANGE, 3, f"ID {tid} LEAD"
-        elif tid in member_of:
-            color, text = GREEN, f"ID {tid} {member_of[tid]}"
-        cv2.rectangle(out, (int(x1), int(y1)), (int(x2), int(y2)), color, thick)
-        _label(out, text, x1, y1 - 2, color, 0.42 * scale)
-
+    # arrows first, so the ID labels drawn afterwards stay readable
     for leader, follower, conf in follows:
         if leader in by_id and follower in by_id:
             lb, fb = by_id[leader], by_id[follower]
             p1 = (int((fb[0] + fb[2]) / 2), int((fb[1] + fb[3]) / 2))
             p2 = (int((lb[0] + lb[2]) / 2), int((lb[1] + lb[3]) / 2))
+            if (leader, follower) in indirect:  # implied by a chain: keep it subtle
+                cv2.arrowedLine(out, p1, p2, RED, 1, cv2.LINE_AA, tipLength=0.05)
+                continue
             cv2.arrowedLine(out, p1, p2, RED, 3, cv2.LINE_AA, tipLength=0.08)
             mid = ((p1[0] + p2[0]) // 2, (p1[1] + p2[1]) // 2)
             _label(out, f"{conf:.0%}", mid[0], mid[1], RED, 0.5 * scale)
+
+    # people involved in a following link are drawn last (on top) with a larger label
+    involved = set(leaders_of) | set(followers_of)
+    for tid, (x1, y1, x2, y2), conf in sorted(detections, key=lambda d: d[0] in involved):
+        color, thick, text, size = id_color(tid), 2, f"ID {tid}", 0.42
+        if tid in leaders_of and tid in followers_of:
+            color, thick, size = PURPLE, 3, 0.52
+            text = [f"ID {tid} FOLLOWS {_ids(leaders_of[tid])}", f"FOLLOWED BY {_ids(followers_of[tid])}"]
+        elif tid in leaders_of:
+            color, thick, text, size = RED, 3, f"ID {tid} FOLLOWS {_ids(leaders_of[tid])}", 0.52
+        elif tid in followers_of:
+            color, thick, text, size = ORANGE, 3, f"ID {tid} FOLLOWED BY {_ids(followers_of[tid])}", 0.52
+        elif tid in member_of:
+            color, text = GREEN, f"ID {tid} {member_of[tid]}"
+        cv2.rectangle(out, (int(x1), int(y1)), (int(x2), int(y2)), color, thick)
+        _label(out, text, x1, y1 - 2, color, size * scale)
 
     # HUD
     level = hud.get("level", "normal")
