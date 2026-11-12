@@ -26,3 +26,6 @@ frontend/dist/
 *.mp4
 *.avi
 *.mkv
+
+# Locally generated demo / test clips
+demo/
