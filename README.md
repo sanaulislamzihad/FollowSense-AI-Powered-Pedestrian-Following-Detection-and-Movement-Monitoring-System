@@ -174,32 +174,6 @@ opposite directions, short following, standing people, a 40-person crowd); crowd
 congestion clustering, overcrowding alerts, camera-pan compensation and photo capture; the API test
 uploads a video and exercises every endpoint including the PDF report and the event photos.
 
-## Results on the test footage
-
-Two handheld iPhone clips of a busy campus plaza (portrait, 120 fps) were used for testing; real
-deployments will use fixed CCTV angles, which are easier (no camera motion).
-
-| Clip | Length | Camera motion | Peak / avg people | Following | Groups | Crowd alerts |
-|---|---|---|---|---|---|---|
-| IMG_7706 (high view, dense crowd) | 35.7 s | 421 px | 40 / 31 | 0 | 5 | 1 congestion |
-| IMG_7595 (low view, strong pans, 4K HEVC) | 31.5 s | ≈3500 px | 30 / 21 | 0 | 1 | 3 congestion |
-
-Nobody follows anybody in these clips, so they only show that an ordinary crowd does not raise alerts.
-(The IMG_7595 row was measured with an earlier version and has not been re-run.)
-
-**Following inside a real crowd.** To test detection where the answer is known, four walkers (cut-outs of
-real people from the same footage) were inserted into 19.6 s of IMG_7706 along a scripted, curved route:
-two people side by side, a third following both, and a fourth following the third. Real passers-by occlude
-them and the camera keeps its handheld motion. Result: all 3 scripted links were raised (73–90 %
-confidence, about 9 s after the walkers appear) plus the chain-implied link, and none of the other ~135
-tracked people produced a following alert. This is a staged scenario — it shows the pipeline end to end, it
-is not an accuracy figure for real CCTV. On other routes through the same crowd a link was missed when a
-walker passed directly behind a standing group and lost its track.
-
-Camera motion compensation matters: on the first 12 s of IMG_7595 *without* it, panning made standing
-people look like they walked together and produced 11 false "potential following" pairs; with it, 0.
-Feeding the same motion estimate into the tracker's Kalman prediction raised the average number of
-continuously tracked people from 19.4 to 24.3 and reduced ID fragmentation.
 
 ## Configuration notes for real cameras
 
