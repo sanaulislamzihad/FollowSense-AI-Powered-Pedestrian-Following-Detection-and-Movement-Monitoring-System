@@ -203,10 +203,3 @@ uploads a video and exercises every endpoint including the PDF report and the ev
 - Camera motion compensation assumes a mostly planar/distant background; long handheld recordings
   accumulate small drift.
 
-## Privacy
-
-Anonymous numeric track IDs only, no facial recognition or identity matching. Photos of the two people of a
-following event **are stored** (they are personal data — follow your local CCTV / data-protection rules and
-restrict who can open the dashboard; it has no login of its own). Uploaded videos, annotated outputs,
-snapshots and photos live under `FS_DATA_DIR` and are deleted with the video or the analysis
-(Video Management → delete removes the video, analyses, events and files).
